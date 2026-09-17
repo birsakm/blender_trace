@@ -9,6 +9,7 @@ Unified CLI for the BlenderTrace mining pipeline:
     blender-trace manifest <video_dir> [--method narration|visual] [--panel-box x0 y0 x1 y1]
     blender-trace keyframes <video_dir> [--panel-box x0 y0 x1 y1]   # only for --method visual
     blender-trace pipeline <url>   # download -> transcribe -> manifest (narration by default)
+    blender-trace render <script.py> --out <dir>   # headless-render a bpy/bmesh script
 """
 import argparse
 import json
@@ -19,6 +20,7 @@ from . import discover as discover_mod
 from . import download as download_mod
 from . import keyframes as keyframes_mod
 from . import manifest as manifest_mod
+from . import render as render_mod
 from . import transcribe as transcribe_mod
 
 DEFAULT_PANEL_BOX = [0.55, 0.0, 1.0, 0.06]
@@ -67,6 +69,12 @@ def cmd_keyframes(args):
     keyframes_mod.extract(
         args.video_dir, tuple(args.panel_box), args.diff_threshold, args.min_gap_s
     )
+
+
+def cmd_render(args):
+    result = render_mod.render_script(args.script, args.out)
+    print(f"Rendered to {result['render_path']}")
+    print(f"Stats: {result['stats']}")
 
 
 def cmd_manifest(args):
@@ -167,6 +175,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-gap-s", type=float, default=DEFAULT_MIN_GAP_S,
                    help="only used by --method visual")
     p.set_defaults(func=cmd_pipeline)
+
+    p = sub.add_parser(
+        "render", help="Headless-render a bpy/bmesh reconstruction script (verification loop)"
+    )
+    p.add_argument("script", type=Path)
+    p.add_argument("--out", type=Path, required=True)
+    p.set_defaults(func=cmd_render)
 
     return ap
 
