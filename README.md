@@ -24,18 +24,80 @@ necessary.
 
 ## Status
 
-Early scaffolding. What exists right now is the **data-mining side**: live
-video discovery, download, transcription, keyframe/panel extraction, and
-manifest building. It produces `manifest.json` per video — a list of
-candidate `{narration, frame_before, frame_after}` segments — which is *not*
-yet a training dataset. The **verification loop** (agent reconstructs
-`bpy`/`bmesh` code per segment → render in headless Blender → compare against
-`frame_after` → keep only matches) is the next stage and is not implemented
-yet.
+The **data-mining side** works end to end: live video discovery, download,
+transcription, narration-driven segmentation, and manifest building produce
+`manifest.json` per video. The **verification loop** (agent reconstructs
+`bpy`/`bmesh` code per segment → render headless → compare against
+`frame_after` → keep only matches) now has working infrastructure
+(`render.py`, `verify.py`) and has been piloted end to end on 3 real
+segments -- see "Verification loop pilot" below. There's no
+`ANTHROPIC_API_KEY` (or equivalent) configured in this environment, so the
+"write code from narration+frames" and "judge the render" steps are
+currently done by a Claude Code session/subagent acting on the files
+`verify.py` produces, not by a standalone automated script -- see that
+section for what that means in practice and how to swap in an API-driven
+caller later.
 
-This machine has real internet access, 4x A100 GPUs, and several `bpy_*`
-conda environments (4.0 through 5.0.1) already available — the verification
-loop's headless-render step can run directly here.
+This machine has real internet access, 4x A100 GPUs, and a standalone
+Blender 4.3.0 binary at `blender-releases/blender-4.3.0-linux-x64/` used for
+headless rendering (see `render.py` docstring for why: every `bpy_*` conda
+env's `import bpy` is broken by a USD/TBB symbol clash from this machine's
+`LD_LIBRARY_PATH`, and that same variable breaks the standalone binary too
+if it leaks through a subprocess call -- `render_script()` always launches
+with a clean env for this reason).
+
+### Verification loop pilot (3 segments, video 1)
+
+Piloted the full loop -- write `bpy`/`bmesh` reconstruction code from a
+manifest segment's narration + frames, render it headless, judge the render
+against `frame_after` -- on 3 real segments from video 1's manifest
+(scripts in `examples/verification_pilot/`, results in
+`data/<video_id>/verify/<segment_index>/`). No API key was available, so a
+Claude Code session played both the "write the code" and "judge the
+render" roles directly, using `blender-trace verify` to render and record
+each verdict.
+
+Building the render harness itself surfaced two real bugs, fixed along the
+way:
+- Plain solid-shading renders don't include the edge/wireframe overlay
+  every tutorial screenshot shows (that's a viewport-only gizmo, never
+  baked into a `bpy.ops.render.render()` image) -- so a subdivided cube
+  rendered identically to a plain one. Freestyle would be the "correct"
+  fix but wasn't reliably available across engines in this Blender build;
+  fixed by duplicating each mesh with a Wireframe modifier
+  (`use_replace=True`) and a dark material instead, which is portable
+  across render engines.
+- A single fixed camera angle isn't reliable: piloting segment 5 (see
+  below) rendered as visually identical to the un-edited mesh purely
+  because the edited face was on the far side of the object from that one
+  angle -- confirmed by re-rendering from an axis-aligned view, which
+  showed the edit clearly. `render_script()` now renders 4 corner views by
+  default instead of 1.
+
+Results, 1 match / 2 mismatches -- and the mismatches are as informative as
+the match:
+
+- **Segment 2** ("going to add in a cube and then") -- reconstructed a
+  plain cube. Matches `frame_after`: an un-subdivided cube, consistent with
+  no Subdivide having run yet.
+- **Segment 3** ("subdivide this two times. You can press") -- reconstructed
+  a single `subdivide(cuts=1)` (a 2x2 grid per face), since the "shift R"
+  repeat is narrated in the *next* segment. But `frame_after` already shows
+  a 4x4 grid: the visual edit had run ahead of the narration boundary,
+  completing before the words describing the repeat were spoken.
+- **Segment 5** ("delete out this corner, fill these faces in with the F
+  key") -- reconstructed delete + fill. The delete step matched exactly
+  (confirmed only after the multi-angle render fix -- the default single
+  angle happened to hide that face). But `frame_after` actually shows the
+  moment *right before* the fill executes: the hole is still open with the
+  "New Edge/Face from Vertices (F)" context menu open, not yet clicked. The
+  reconstruction went one step further than what this frame shows.
+
+**Implication:** `frame_after` frequently captures the instant an operator
+is invoked or mid-menu, not its fully completed result -- true in 2 of 3
+piloted segments. A production verification loop should treat "does the
+render match `frame_after`" as a soft signal to reconcile against
+neighboring frames/segments, not a strict pass/fail against one timestamp.
 
 ### First experiment: findings (Josh Gambrell, "This Shape Is Easy!")
 

@@ -17,8 +17,10 @@ def test_render_script_produces_render_and_stats(tmp_path):
 
     result = render_script(script, tmp_path / "out")
 
-    assert Path(result["render_path"]).exists()
-    assert Path(result["render_path"]).stat().st_size > 0
+    assert len(result["render_paths"]) == 4
+    for path in result["render_paths"].values():
+        assert Path(path).exists()
+        assert Path(path).stat().st_size > 0
     assert result["stats"]["objects"] == 1
     assert result["stats"]["vertices"] == 8
     assert result["stats"]["faces"] == 6

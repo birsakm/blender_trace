@@ -22,6 +22,7 @@ from . import keyframes as keyframes_mod
 from . import manifest as manifest_mod
 from . import render as render_mod
 from . import transcribe as transcribe_mod
+from . import verify as verify_mod
 
 DEFAULT_PANEL_BOX = [0.55, 0.0, 1.0, 0.06]
 # 12.0/1.5 (the original defaults) missed a 70+ second run of ~10 distinct
@@ -73,8 +74,20 @@ def cmd_keyframes(args):
 
 def cmd_render(args):
     result = render_mod.render_script(args.script, args.out)
-    print(f"Rendered to {result['render_path']}")
+    for name, path in result["render_paths"].items():
+        print(f"Rendered {name} -> {path}")
     print(f"Stats: {result['stats']}")
+
+
+def cmd_verify(args):
+    result = verify_mod.verify_segment(args.video_dir, args.segment_index, args.script)
+    for name, path in result["render_paths"].items():
+        print(f"Rendered {name} -> {path}")
+    print(f"Stats: {result['stats']}")
+    if args.match is not None:
+        verdict = {"match": args.match, "reasoning": args.reasoning, "judge": args.judge}
+        path = verify_mod.save_verdict(args.video_dir, args.segment_index, verdict)
+        print(f"Saved verdict to {path}")
 
 
 def cmd_manifest(args):
@@ -182,6 +195,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("script", type=Path)
     p.add_argument("--out", type=Path, required=True)
     p.set_defaults(func=cmd_render)
+
+    p = sub.add_parser(
+        "verify", help="Render a segment's reconstruction script + optionally record a verdict"
+    )
+    p.add_argument("video_dir", type=Path)
+    p.add_argument("segment_index", type=int)
+    p.add_argument("script", type=Path)
+    match_group = p.add_mutually_exclusive_group()
+    match_group.add_argument("--match", dest="match", action="store_true", default=None)
+    match_group.add_argument("--no-match", dest="match", action="store_false")
+    p.add_argument("--reasoning", default="")
+    p.add_argument("--judge", default="claude-code-session")
+    p.set_defaults(func=cmd_verify)
 
     return ap
 
