@@ -1,0 +1,43 @@
+# Seed channels for `blender-trace discover-channel`.
+#
+# Every handle below was live-verified on 2026-09-17 (via
+# `yt-dlp --flat-playlist --dump-json .../@handle/videos`) -- but channels get
+# renamed, merged, or taken down, so re-verify with
+# `blender-trace discover-check <url>` before a large batch run rather than
+# trusting this file blindly.
+#
+# Notes from verification: @JoshGambrell and @PonteRyuurui both currently
+# publish under the "Blender Bros" team brand -- @BlenderBros itself resolves
+# to an unrelated channel, so it's deliberately left out. Arrimus 3D's old
+# handle (@Arrimus3D) 404s; the live channel is @Arrimus3DModelDesign
+# ("Arrimus3D Modeling and Design"), with @arrimus3darchive holding the old
+# back-catalog under the "Arrimus 3D Archive" name.
+
+channels:
+  - name: "Josh Gambrell (Blender Bros)"
+    url: "https://www.youtube.com/@JoshGambrell/videos"
+    style: "sub-d hard-surface, narrates parameter values out loud"
+
+  - name: "Ponte Ryuurui (Blender Bros)"
+    url: "https://www.youtube.com/@PonteRyuurui/videos"
+    style: "hard-surface concept work, good variety of object categories"
+
+  - name: "Arrimus3D Modeling and Design"
+    url: "https://www.youtube.com/@Arrimus3DModelDesign/videos"
+    style: "explicit about why, not just what -- good narration quality"
+
+  - name: "Arrimus 3D Archive"
+    url: "https://www.youtube.com/@arrimus3darchive/videos"
+    style: "back-catalog of the above under the old channel name"
+
+  - name: "Creative Shrimp (Gleb Alexandrov)"
+    url: "https://www.youtube.com/@CreativeShrimp/videos"
+    style: "topology-focused, some deprecated (2.79-era) operator names"
+
+  - name: "CGMasters (Aidy Burrows)"
+    url: "https://www.youtube.com/@CGMasters/videos"
+    style: "topology-focused, some deprecated (2.79-era) operator names"
+
+  - name: "Grant Abbitt (Gabbitt)"
+    url: "https://www.youtube.com/@grabbitt/videos"
+    style: "beginner-to-intermediate hard-surface and general modeling, very explicit step-by-step"

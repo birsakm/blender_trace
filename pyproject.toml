@@ -1,0 +1,25 @@
+[project]
+name = "blender-trace"
+version = "0.1.0"
+description = "Mining verified Blender tutorial edit-traces (narration + before/after keyframes + reconstructed bpy code) to train LLM/VLM Blender modelers."
+requires-python = ">=3.11"
+dependencies = [
+    "yt-dlp>=2024.1.0",
+    "faster-whisper>=1.0.0",
+    "opencv-python>=4.9.0",
+    "numpy>=1.26.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+blender-trace = "blender_trace.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

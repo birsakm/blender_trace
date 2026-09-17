@@ -1,0 +1,9 @@
+# Per-channel calibration for the F9/header redo-panel crop box used by
+# `blender-trace keyframes --panel-box x0 y0 x1 y1` (fractional coords, 0-1).
+#
+# Most channels keep a consistent screen layout across videos, so this is a
+# one-time cost per channel, not per video -- see README "Calibrating the
+# panel crop". Fill in an entry here after eyeballing one exported frame from
+# that channel; nothing here is pre-calibrated yet.
+
+# JoshGambrell_BlenderBros: [0.55, 0.0, 1.0, 0.06]
