@@ -34,7 +34,14 @@ def download(url: str, out_dir: Path, max_height: int) -> Path:
         "duration_s": info.get("duration"),
     }, indent=2))
 
-    fmt = f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]"
+    # Prefer avc1/h264: this environment's OpenCV build has no AV1 decoder
+    # (yt-dlp's default "best" often picks an AV1-only stream), which makes
+    # cv2.VideoCapture.read() silently fail on every frame. Fall back to
+    # whatever's available if a channel has no h264 stream at this height.
+    fmt = (
+        f"bestvideo[height<={max_height}][vcodec^=avc1]+bestaudio/"
+        f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]"
+    )
     cmd = [
         "yt-dlp",
         "-f", fmt,

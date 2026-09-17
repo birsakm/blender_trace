@@ -37,6 +37,58 @@ This machine has real internet access, 4x A100 GPUs, and several `bpy_*`
 conda environments (4.0 through 5.0.1) already available — the verification
 loop's headless-render step can run directly here.
 
+### First experiment: findings (Josh Gambrell, "This Shape Is Easy!")
+
+Ran the full pipeline against one real video end to end. Fixed three real
+bugs surfaced by doing that (not just theoretical edge cases):
+
+- `download.py` defaulted to `yt-dlp`'s "best" format, which is often
+  AV1-only; this OpenCV build has no AV1 decoder, so `cv2.VideoCapture.read()`
+  silently failed on every frame. Now prefers avc1/h264 explicitly.
+- `keyframes.py` and `transcribe.py`'s Whisper fallback resolved the video
+  file via `glob("video.*")`, which also matches the sibling `.srt`/`.vtt`
+  caption files `download.py` writes — glob order isn't alphabetical, so it
+  could silently open a subtitle file as if it were the video. Now points at
+  `video.mp4` directly (which is what `download.py` always merges to).
+- `transcribe.py`'s SRT parser joined raw cue text naively. YouTube's
+  auto-captions use a rolling multi-line window (each cue repeats the
+  previous line and appends a new one), so naive joining duplicated most
+  words up to 4x. Fixed by deduping on each cue's last line.
+
+Two non-bug findings that matter more for the research direction:
+
+- **Narration quality is excellent** — confirms the core hypothesis. This
+  artist narrates specific key commands ("F key", "shift R", "ctrl 2",
+  "shift G, co-planar") in a way that's plausibly reconstructable into
+  discrete `bpy`/`bmesh` calls.
+- **Viewport pixel-diff is an unreliable segmentation signal.** The original
+  boundary detector compared each sampled frame only to the *previous
+  sample*, not the last saved keyframe, so a long run of small cumulative
+  edits (~10 distinct operations over 71s in one case) never crossed the
+  diff threshold and collapsed into one unusable segment. Fixed to diff
+  against the last keyframe instead, which helped, but a deeper problem
+  remains even after that fix and after lowering the threshold: **this
+  channel orbits/zooms the camera constantly while narrating**, and camera
+  movement alone produces viewport pixel-diffs just as large as an actual
+  mesh edit — the detector cannot tell them apart. Confirmed by inspecting
+  frame pairs directly: a segment labeled "delete out this corner" showed a
+  completely different camera angle/zoom between `frame_before` and
+  `frame_after`, not a legible before/after of the described edit.
+
+**Implication for next steps:** pixel-diff-based visual segmentation should
+not be the primary segmentation signal. Narration-driven segmentation
+(splitting on sentence/clause boundaries that name a specific action or
+tool) is likely a better primary signal, with frames pulled at those
+boundaries for verification rather than for detecting the boundaries
+themselves. This is a design change to `keyframes.py`/`manifest.py`, not yet
+implemented.
+
+Separately: the F9 redo-panel and the persistent Properties-editor panel
+(which shows live modifier values) occupy *different* screen regions and
+neither is reliably present on its own — `keyframes.py` only supports one
+crop box per run. See `configs/panel_boxes.yaml` for the calibration used
+here and the tradeoff it makes.
+
 ## Setup
 
 ```bash

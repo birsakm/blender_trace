@@ -31,7 +31,10 @@ def extract(
     min_gap_s: float,
     sample_fps: float = 2.0,
 ):
-    video_path = next(video_dir.glob("video.*"))
+    # Not a glob("video.*") -- that also matches the sibling .srt/.vtt caption
+    # files download.py writes, and glob order isn't guaranteed alphabetical,
+    # so it can silently pick a subtitle file instead of the video.
+    video_path = video_dir / "video.mp4"
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_interval = max(1, round(fps / sample_fps))
@@ -42,7 +45,13 @@ def extract(
     panels_dir.mkdir(exist_ok=True)
 
     px0, py0, px1, py1 = panel_box
-    prev_gray = None
+    # Diff against the last *saved keyframe*, not the previous sample -- a
+    # long sequence of small, gradual edits (or a slow orbit) can drift a
+    # long way while never producing a single frame-to-frame delta big
+    # enough to cross diff_threshold, silently collapsing many distinct
+    # operations into one giant "segment" that no single before/after frame
+    # pair can represent.
+    reference_gray = None
     last_saved_t = -1e9
     keyframes = []
 
@@ -64,13 +73,12 @@ def extract(
         gray = cv2.resize(gray, (320, 180))
 
         is_boundary = False
-        if prev_gray is None:
+        if reference_gray is None:
             is_boundary = True
         else:
-            diff = np.mean(np.abs(gray.astype(float) - prev_gray.astype(float)))
+            diff = np.mean(np.abs(gray.astype(float) - reference_gray.astype(float)))
             if diff > diff_threshold and (t - last_saved_t) > min_gap_s:
                 is_boundary = True
-        prev_gray = gray
 
         if is_boundary:
             frame_path = frames_dir / f"frame_{t:.2f}.png"
@@ -88,6 +96,7 @@ def extract(
                 "panel_path": str(panel_path.relative_to(video_dir)),
             })
             last_saved_t = t
+            reference_gray = gray
 
         frame_idx += 1
 

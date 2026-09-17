@@ -4,6 +4,12 @@
 # Most channels keep a consistent screen layout across videos, so this is a
 # one-time cost per channel, not per video -- see README "Calibrating the
 # panel crop". Fill in an entry here after eyeballing one exported frame from
-# that channel; nothing here is pre-calibrated yet.
-
-# JoshGambrell_BlenderBros: [0.55, 0.0, 1.0, 0.06]
+# that channel.
+#
+# Note: on Josh Gambrell / Blender Bros videos (Blender 5.2.1 default
+# layout), the transient F9 "redo last operator" popup appears bottom-left
+# (~[0.03, 0.68, 0.25, 0.98]), while the persistent Properties editor (which
+# shows live modifier parameter values -- e.g. Subdivision Surface levels)
+# sits at the box below. A single crop box can't cover both regions; this
+# one favors the persistent panel since it's present far more often.
+JoshGambrell_BlenderBros: [0.82, 0.08, 1.0, 0.75]

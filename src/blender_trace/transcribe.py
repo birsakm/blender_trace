@@ -25,6 +25,14 @@ def parse_srt(srt_path: Path) -> list[dict]:
     def to_sec(h, m, s, ms):
         return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
+    # YouTube's auto-generated SRT uses a rolling multi-line window: each cue
+    # repeats the previous cue's last line on top and appends a new line
+    # below, with an extra near-zero-duration "spacer" cue in between that
+    # repeats the same last line with a blank line. Joining all lines of
+    # every cue naively duplicates every word up to N times. The bottom line
+    # of each cue is always the newest text, so track just that and only
+    # emit it when it changes from the previous cue's bottom line.
+    prev_last_line = None
     for block in blocks:
         lines = block.strip().splitlines()
         for line in lines:
@@ -35,10 +43,12 @@ def parse_srt(srt_path: Path) -> list[dict]:
                 text_lines = [
                     l for l in lines[lines.index(line) + 1:] if l.strip()
                 ]
-                text = " ".join(text_lines).strip()
-                # collapse duplicate cue text some auto-caption formats produce
-                if text:
-                    segments.append({"t_start": t_start, "t_end": t_end, "text": text})
+                if not text_lines:
+                    break
+                last_line = text_lines[-1].strip()
+                if last_line and last_line != prev_last_line:
+                    segments.append({"t_start": t_start, "t_end": t_end, "text": last_line})
+                prev_last_line = last_line
                 break
     return segments
 
@@ -46,7 +56,10 @@ def parse_srt(srt_path: Path) -> list[dict]:
 def whisper_fallback(video_dir: Path) -> list[dict]:
     from faster_whisper import WhisperModel
 
-    video_path = next(video_dir.glob("video.*"))
+    # Not glob("video.*") -- that also matches sibling .srt/.vtt caption
+    # files and glob order isn't guaranteed alphabetical, so it can silently
+    # pick a subtitle file instead of the video.
+    video_path = video_dir / "video.mp4"
     audio_path = video_dir / "audio.wav"
     subprocess.run(
         ["ffmpeg", "-y", "-i", str(video_path), "-ar", "16000", "-ac", "1", str(audio_path)],

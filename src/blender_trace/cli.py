@@ -22,6 +22,16 @@ from . import manifest as manifest_mod
 from . import transcribe as transcribe_mod
 
 DEFAULT_PANEL_BOX = [0.55, 0.0, 1.0, 0.06]
+# 12.0/1.5 (the original defaults) missed a 70+ second run of ~10 distinct
+# mesh edits on a real video because the detector compared each sample only
+# to the previous sample, not to the last saved keyframe -- slow cumulative
+# drift never tripped a single-step threshold. Fixed to diff against the
+# last keyframe (see keyframes.py); 6.0/1.0 is what closed most of that gap
+# in practice, but still doesn't distinguish camera orbit/zoom from an
+# actual mesh edit -- expect to tune per channel, and treat this as a
+# starting point, not a solved problem.
+DEFAULT_DIFF_THRESHOLD = 6.0
+DEFAULT_MIN_GAP_S = 1.0
 
 
 def cmd_discover_channel(args):
@@ -115,8 +125,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("video_dir", type=Path)
     p.add_argument("--panel-box", type=float, nargs=4, default=DEFAULT_PANEL_BOX,
                     metavar=("X0", "Y0", "X1", "Y1"))
-    p.add_argument("--diff-threshold", type=float, default=12.0)
-    p.add_argument("--min-gap-s", type=float, default=1.5)
+    p.add_argument("--diff-threshold", type=float, default=DEFAULT_DIFF_THRESHOLD)
+    p.add_argument("--min-gap-s", type=float, default=DEFAULT_MIN_GAP_S)
     p.set_defaults(func=cmd_keyframes)
 
     p = sub.add_parser("manifest", help="Combine transcript + keyframes into manifest.json")
@@ -130,8 +140,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="data")
     p.add_argument("--panel-box", type=float, nargs=4, default=DEFAULT_PANEL_BOX,
                     metavar=("X0", "Y0", "X1", "Y1"))
-    p.add_argument("--diff-threshold", type=float, default=12.0)
-    p.add_argument("--min-gap-s", type=float, default=1.5)
+    p.add_argument("--diff-threshold", type=float, default=DEFAULT_DIFF_THRESHOLD)
+    p.add_argument("--min-gap-s", type=float, default=DEFAULT_MIN_GAP_S)
     p.set_defaults(func=cmd_pipeline)
 
     return ap
