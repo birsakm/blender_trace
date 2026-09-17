@@ -118,6 +118,29 @@ detector settings (or an exclusion mask) accordingly, or (b) to drop
 pixel-diff as the primary boundary signal in favor of narration-driven
 segmentation, which is unaffected by any of this.
 
+### Narration-driven segmentation (implemented)
+
+Acted on the conclusion above: `segment.py` now decides segment boundaries
+from transcript content instead of pixel-diffing. It looks for cues that
+name a specific hotkey or tool/operator (`ACTION_CUES` -- e.g. "shift R",
+"bevel", "grid fill", "unwrap") and starts a new segment at the first cue
+that mentions one, provided enough time (`--min-segment-s`, default 1.5s)
+has passed since the last split. `manifest.py`'s narration method (now the
+default for `blender-trace manifest`/`pipeline`) uses this directly:
+`keyframes.py`'s pixel-diff detector (the `keyframes` command, `--method
+visual`) is no longer required and is kept only for comparison.
+
+This is a heuristic keyword list, not a parser, and it will always be
+incomplete for a domain with this many named operators -- expect to keep
+extending `ACTION_CUES` as more videos get processed. Even so, re-running it
+against all three pilot videos fixed the specific failure found earlier:
+the 71.5-second, ~10-operation blob in video 1 became 9 segments of 1.6-11.5s
+each, and spot-checking one of them ("delete out this corner, fill these
+faces in with the F key") showed the `frame_after` with the exact "New
+Edge/Face from Vertices (F)" menu entry open -- a literal, verifiable match
+to the narration, and unaffected by camera movement since nothing here
+looks at pixel differences at all.
+
 ## Setup
 
 ```bash
@@ -150,13 +173,17 @@ pip install -e ".[dev]"
    redo-panel, no more) + subtitles if available, into `data/<video_id>/`.
 3. **`transcribe`** — if captions exist, normalizes them; otherwise runs
    local Whisper (`faster-whisper`) on the extracted audio.
-4. **`keyframes`** — detects edit boundaries via frame-differencing in the
-   viewport region, saves keyframe PNGs, and crops+saves the header/status
-   bar / F9 redo-panel region for later OCR.
-5. **`manifest`** — stitches keyframes + transcript segments into
-   `manifest.json`: a list of `{t_start, t_end, narration, frame_before,
-   frame_after, panel_before, panel_after}` segments — the unit of work for
-   the (not-yet-built) VLM reconstruction step.
+4. **`manifest`** — decides segment boundaries and builds `manifest.json`: a
+   list of `{t_start, t_end, narration, frame_before, frame_after,
+   panel_before, panel_after}` segments — the unit of work for the
+   (not-yet-built) VLM reconstruction step. Two methods (`--method`):
+   - `narration` (default) — segments on transcript content (see
+     `segment.py`), sampling frames directly at the resulting boundaries.
+     Only needs `transcribe` to have run first.
+   - `visual` — the original approach: pairs up consecutive keyframes from
+     a prior `keyframes` run (frame-differencing in the viewport region).
+     Kept for comparison; the pilot run (see "Status" below) found it
+     unreliable across real videos, so it's no longer the default.
 
 ```bash
 # 1. Find what's currently live on a seed channel (see configs/channels.yaml)
@@ -174,8 +201,7 @@ blender-trace pipeline "https://www.youtube.com/watch?v=<id>" \
 # Or run stages individually once settings are calibrated for a channel:
 blender-trace download "<url>"
 blender-trace transcribe data/<video_id>
-blender-trace keyframes data/<video_id> --panel-box 0.55 0.0 1.0 0.06
-blender-trace manifest data/<video_id>
+blender-trace manifest data/<video_id> --panel-box 0.55 0.0 1.0 0.06
 ```
 
 `manifest.json` is the artifact to actually inspect: for each segment, look

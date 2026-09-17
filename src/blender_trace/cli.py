@@ -6,9 +6,9 @@ Unified CLI for the BlenderTrace mining pipeline:
     blender-trace discover-check <url>
     blender-trace download <url> [--out data] [--max-height 1080]
     blender-trace transcribe <video_dir>
-    blender-trace keyframes <video_dir> [--panel-box x0 y0 x1 y1]
-    blender-trace manifest <video_dir>
-    blender-trace pipeline <url>   # download -> transcribe -> keyframes -> manifest
+    blender-trace manifest <video_dir> [--method narration|visual] [--panel-box x0 y0 x1 y1]
+    blender-trace keyframes <video_dir> [--panel-box x0 y0 x1 y1]   # only for --method visual
+    blender-trace pipeline <url>   # download -> transcribe -> manifest (narration by default)
 """
 import argparse
 import json
@@ -32,6 +32,7 @@ DEFAULT_PANEL_BOX = [0.55, 0.0, 1.0, 0.06]
 # starting point, not a solved problem.
 DEFAULT_DIFF_THRESHOLD = 6.0
 DEFAULT_MIN_GAP_S = 1.0
+DEFAULT_MIN_SEGMENT_S = 1.5
 
 
 def cmd_discover_channel(args):
@@ -69,16 +70,27 @@ def cmd_keyframes(args):
 
 
 def cmd_manifest(args):
-    manifest_mod.main(args.video_dir)
+    manifest_mod.main(
+        args.video_dir,
+        method=args.method,
+        panel_box=tuple(args.panel_box),
+        min_segment_s=args.min_segment_s,
+    )
 
 
 def cmd_pipeline(args):
     video_dir = download_mod.download(args.url, Path(args.out), max_height=1080)
     transcribe_mod.main(video_dir)
-    keyframes_mod.extract(
-        video_dir, tuple(args.panel_box), args.diff_threshold, args.min_gap_s
+    if args.method == "visual":
+        keyframes_mod.extract(
+            video_dir, tuple(args.panel_box), args.diff_threshold, args.min_gap_s
+        )
+    manifest_mod.main(
+        video_dir,
+        method=args.method,
+        panel_box=tuple(args.panel_box),
+        min_segment_s=args.min_segment_s,
     )
-    manifest_mod.main(video_dir)
     print(
         f"\nDone. Inspect {video_dir}/manifest.json, and open a couple of "
         f"{video_dir}/panels/*.png to check whether --panel-box needs adjusting "
@@ -129,19 +141,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-gap-s", type=float, default=DEFAULT_MIN_GAP_S)
     p.set_defaults(func=cmd_keyframes)
 
-    p = sub.add_parser("manifest", help="Combine transcript + keyframes into manifest.json")
+    p = sub.add_parser("manifest", help="Build manifest.json from transcript (+ keyframes)")
     p.add_argument("video_dir", type=Path)
+    p.add_argument("--method", choices=["narration", "visual"], default="narration",
+                   help="narration (default): segment on transcript content, sample frames "
+                        "directly. visual: use keyframes.json from a prior `keyframes` run.")
+    p.add_argument("--panel-box", type=float, nargs=4, default=DEFAULT_PANEL_BOX,
+                    metavar=("X0", "Y0", "X1", "Y1"), help="only used by --method narration")
+    p.add_argument("--min-segment-s", type=float, default=DEFAULT_MIN_SEGMENT_S,
+                   help="only used by --method narration")
     p.set_defaults(func=cmd_manifest)
 
     p = sub.add_parser(
-        "pipeline", help="Run download->transcribe->keyframes->manifest for one video"
+        "pipeline", help="Run download->transcribe->manifest for one video"
     )
     p.add_argument("url")
     p.add_argument("--out", default="data")
+    p.add_argument("--method", choices=["narration", "visual"], default="narration")
     p.add_argument("--panel-box", type=float, nargs=4, default=DEFAULT_PANEL_BOX,
                     metavar=("X0", "Y0", "X1", "Y1"))
-    p.add_argument("--diff-threshold", type=float, default=DEFAULT_DIFF_THRESHOLD)
-    p.add_argument("--min-gap-s", type=float, default=DEFAULT_MIN_GAP_S)
+    p.add_argument("--min-segment-s", type=float, default=DEFAULT_MIN_SEGMENT_S,
+                   help="only used by --method narration")
+    p.add_argument("--diff-threshold", type=float, default=DEFAULT_DIFF_THRESHOLD,
+                   help="only used by --method visual")
+    p.add_argument("--min-gap-s", type=float, default=DEFAULT_MIN_GAP_S,
+                   help="only used by --method visual")
     p.set_defaults(func=cmd_pipeline)
 
     return ap

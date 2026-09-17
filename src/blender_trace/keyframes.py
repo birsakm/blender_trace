@@ -24,6 +24,63 @@ import cv2
 import numpy as np
 
 
+def extract_frames_at(
+    video_dir: Path,
+    timestamps: list[float],
+    panel_box: tuple[float, float, float, float],
+) -> dict[float, dict]:
+    """Save the frame (+ panel crop) at or immediately after each requested
+    timestamp, in one sequential pass. Used by the narration-driven manifest
+    builder, which decides segment boundaries from transcript content rather
+    than from pixel-diffing -- this just needs to fetch specific timestamps,
+    not detect anything.
+
+    Returns {timestamp: {"frame_path": ..., "panel_path": ...}}, keyed by
+    the exact input timestamps (not the actual frame time, which may lag
+    by up to one sample).
+    """
+    video_path = video_dir / "video.mp4"
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+    frames_dir = video_dir / "frames"
+    panels_dir = video_dir / "panels"
+    frames_dir.mkdir(exist_ok=True)
+    panels_dir.mkdir(exist_ok=True)
+
+    px0, py0, px1, py1 = panel_box
+    targets = sorted(set(timestamps))
+    target_idx = 0
+    result = {}
+
+    frame_idx = 0
+    while target_idx < len(targets):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        t = frame_idx / fps
+        if t >= targets[target_idx]:
+            requested_t = targets[target_idx]
+            h, w = frame.shape[:2]
+            frame_path = frames_dir / f"frame_{requested_t:.2f}.png"
+            cv2.imwrite(str(frame_path), frame)
+
+            x0, x1 = int(px0 * w), int(px1 * w)
+            y0, y1 = int(py0 * h), int(py1 * h)
+            panel_path = panels_dir / f"panel_{requested_t:.2f}.png"
+            cv2.imwrite(str(panel_path), frame[y0:y1, x0:x1])
+
+            result[requested_t] = {
+                "frame_path": str(frame_path.relative_to(video_dir)),
+                "panel_path": str(panel_path.relative_to(video_dir)),
+            }
+            target_idx += 1
+        frame_idx += 1
+
+    cap.release()
+    return result
+
+
 def extract(
     video_dir: Path,
     panel_box: tuple[float, float, float, float],
