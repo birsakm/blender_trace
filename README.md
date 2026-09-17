@@ -89,6 +89,35 @@ neither is reliably present on its own — `keyframes.py` only supports one
 crop box per run. See `configs/panel_boxes.yaml` for the calibration used
 here and the tradeoff it makes.
 
+### Second and third videos: camera movement is video-style-dependent, not universal
+
+Ran two more videos to check whether the camera-movement problem generalizes:
+
+- **Josh Gambrell, "Easy PLUGS in Blender"** (same channel, different video):
+  segments here were clean. Static camera during editing, and the frame
+  pairs directly show the named operation — e.g. a segment narrated "give
+  the cylinder a couple more segments, 64" pairs a frame mid-`Add > Mesh >
+  Cylinder` with the resulting cylinder and its "Add Cylinder" redo panel;
+  another narrated "select one, shift G, co-planar" pairs cleanly with a
+  frame showing the "Select Similar → Coplanar" menu literally open. No
+  camera-movement contamination in the segments checked.
+- **Grant Abbitt, "Make a Low Poly Hot Rod"** (different channel): a
+  different problem entirely — a talking-head webcam overlay (bottom-right
+  quadrant) plus a semi-transparent reference blueprint image in the
+  viewport. The talking head overlaps the region the keyframe diff
+  computation treats as "viewport" (left 70% of frame), so it's a source of
+  constant, edit-irrelevant pixel motion that needs excluding, similar to
+  how the panel-box already gets excluded from the diff.
+
+Net conclusion: **video "style" varies enormously even within one creator's
+back-catalog**, and different styles break the current pixel-diff detector
+in different ways (orbit-heavy explainers vs. talking-head overlays vs.
+clean static-camera step-through). A production version of this pipeline
+likely needs either (a) a per-video/per-channel style classifier that picks
+detector settings (or an exclusion mask) accordingly, or (b) to drop
+pixel-diff as the primary boundary signal in favor of narration-driven
+segmentation, which is unaffected by any of this.
+
 ## Setup
 
 ```bash
