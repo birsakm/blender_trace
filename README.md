@@ -99,6 +99,35 @@ piloted segments. A production verification loop should treat "does the
 render match `frame_after`" as a soft signal to reconcile against
 neighboring frames/segments, not a strict pass/fail against one timestamp.
 
+### Verification loop pilot, batch 2 (segments 6-7, video 1)
+
+Continued the chain to test a new operator family (mirror/symmetrize) and
+recheck the off-by-one pattern above:
+
+- **Segment 6** ("...fill these in. You can hold the F key...") --
+  segment 6's `frame_before` is literally the *same frame* as segment 5's
+  `frame_after` (26.44): the fill's click happens somewhere inside segment
+  6's window, not segment 5's. Reused segment 5's delete+fill
+  reconstruction unchanged and it matches segment 6's `frame_after`
+  (fully enclosed shape, no visible hole) -- confirming the segment-5
+  mismatch was purely a boundary/timing issue, not a wrong reconstruction.
+- **Segment 7** ("symmetrize to this side") -- found and fixed a real bug
+  first: `bpy.ops.mesh.symmetrize` only operated on the ~10 leftover
+  boundary verts still selected from the previous fill step, a near-no-op,
+  until adding `select_all(action='SELECT')` beforehand. After the fix, the
+  mirrored column visibly appears on the opposite face -- the *mechanic* is
+  now verified correct. But `frame_after` shows a much more dramatic
+  cross/plus-shaped silhouette than this reconstruction's simple two-
+  opposite-corners result, meaning the upstream "delete this corner" edit
+  in the real video was evidently larger/more complex than modeled here.
+
+Net effect on the running tally: 2 matches / 3 mismatches across 5 distinct
+segments so far, plus 2 real bugs found in the reconstruction/render code
+itself (not just modeling ambiguity) -- `select_all` before `symmetrize`,
+and the two render.py issues from batch 1. The pattern holding up: writing
+the reconstruction and actually rendering it keeps surfacing concrete,
+fixable bugs and concrete, informative mismatches -- not vague uncertainty.
+
 ### First experiment: findings (Josh Gambrell, "This Shape Is Easy!")
 
 Ran the full pipeline against one real video end to end. Fixed three real
