@@ -128,6 +128,39 @@ and the two render.py issues from batch 1. The pattern holding up: writing
 the reconstruction and actually rendering it keeps surfacing concrete,
 fixable bugs and concrete, informative mismatches -- not vague uncertainty.
 
+### Verification loop pilot, batch 3 (video 2, "poke faces")
+
+Switched videos to test a new operator family without deepening an
+already-compounding chain. Video 2's own base geometry past this point is
+a NURBS curve+bevel "pipe" (`examples/verification_pilot/` doesn't attempt
+that -- reconstructing an exact curve path is a materially bigger task than
+mesh editing and wasn't worth it just to test one operator) -- but the
+`poke` step itself starts from a plain cylinder, so it's cleanly testable
+in isolation. `bpy.ops.mesh.poke()` on the top cap produced exactly the
+expected topology (32-gon -> 32 triangles via 1 new center vertex, checked
+against the stats, not just the render) and matched `frame_before` and the
+narration's own description. Deliberately scoped to just that one
+operator: the segment's `frame_after` shows a much later state (a second
+cylinder plus a connecting curve, from narration that glides through two
+objects' worth of edits in one breath) that this reconstruction doesn't
+attempt -- the same "segments still bundle multiple sub-actions" pattern
+found in earlier batches, now confirmed on a second video/channel too.
+
+**Running total across 3 batches, 2 videos, 6 segments:** 3 matches, 3
+partial-scope matches (mechanic verified correct, but only for a
+deliberately narrower slice than the full segment), 3 outright mismatches
+(numbers overlap because segments 5/6 and 7 each got re-judged once a bug
+was fixed). Every batch has found at least one concrete, fixable bug by
+actually rendering the reconstruction rather than reasoning about it
+in the abstract -- that's the strongest evidence yet that this mechanism
+is worth continuing to invest in. But the pace is genuinely slow (each
+segment is real back-and-forth: write code, render, inspect 4 images,
+often debug), and three batches in, the marginal insight per segment is
+starting to taper off relative to batch 1. The next real decision is
+whether to keep running pilots like this, or start scoping what
+automating this loop (an API-driven caller, see "Status" above) would
+actually take.
+
 ### First experiment: findings (Josh Gambrell, "This Shape Is Easy!")
 
 Ran the full pipeline against one real video end to end. Fixed three real
