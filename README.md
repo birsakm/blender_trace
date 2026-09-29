@@ -206,12 +206,54 @@ differences from the manual pilot above, and why:
   otherwise -- worth checking directly by running it over the same 8
   segments the manual pilot already covers and comparing verdicts.
 
-Requires `OPENAI_API_KEY`; not yet run against real data as of this commit
-(waiting on the key). `client` is a plain `openai.OpenAI()` instance passed
-into every function rather than constructed inside `agent.py`, so nothing
-about the reconstruct/judge/retry logic is OpenAI-specific -- swapping in a
-self-hosted open-weight model later (e.g. via vLLM's OpenAI-compatible
-server) is a `base_url` change at the call site, not a rewrite.
+Requires `OPENAI_API_KEY`. `client` is a plain `openai.OpenAI()` instance
+passed into every function rather than constructed inside `agent.py`, so
+nothing about the reconstruct/judge/retry logic is OpenAI-specific --
+swapping in a self-hosted open-weight model later (e.g. via vLLM's
+OpenAI-compatible server) is a `base_url` change at the call site, not a
+rewrite.
+
+#### First real runs: four bugs found and fixed, in order
+
+Running this against real data (video 1, GPT-4o) surfaced four genuine
+bugs, each found by reading the actual generated code and chained state
+rather than trusting verdict text alone:
+
+1. **Root cause of the worst failures**: `segment.py`'s bare `sub[- ]?d` /
+   `subsurf` action cues matched purely descriptive narration ("...using a
+   sub D workflow...", not a command). The agent fabricated a plausible
+   "add subsurf modifier" action for a segment with nothing to
+   reconstruct, creating a duplicate object that polluted every later
+   segment's chained state -- confirmed directly by inspecting the chained
+   `.blend` (two `Cube*` objects where there should be one, vertex counts
+   double what a plain cube should have). Fixed by removing those cues
+   (genuine "add/apply a subsurf" commands are still caught by the
+   existing `add (a|an|in a|in an)` / `apply` cues) and by skipping
+   reconstruction entirely for segments with no action cue at all.
+2. **"Repeat"/"the same thing" narration is unresolvable without the prior
+   segment's actual code** -- traced one segment's 3 retry attempts
+   directly: attempt 0 correctly guessed the right operator but the wrong
+   object, attempt 1 fixed that, attempt 2 abandoned the working approach
+   entirely for something unrelated. Fixed by persisting each segment's
+   accepted code and passing the immediately preceding one into the next
+   reconstruction call, plus biasing the retry prompt toward the smallest
+   fix that addresses the critique rather than a new approach.
+3. **A real 25-minute hang**: a generated reconstruction script (a bmesh
+   op on an apparently unselected/degenerate face set) put a Blender
+   subprocess at 100% CPU indefinitely, with no timeout in place to catch
+   it. Fixed with a hard `timeout_s` (default 90s) on the subprocess call.
+4. A tally-reporting bug: `"skipped"` verdicts fell through to the
+   `"mismatch"` bucket in the final summary, since the tally dict didn't
+   have a key for them.
+
+After all four fixes, a clean re-run from segment 0 (video 1) produced 2
+clear matches with exactly correct topology (a plain cube; a precisely
+4x4-subdivided cube, both confirmed via vertex/face stats, not just visual
+impression) and 4 mismatches -- but on the *same* operations (delete a
+corner and fill it, symmetrize) the manual pilot also found genuinely
+hard. That's the expected outcome, not a lingering bug: these are real
+model-capability limits on hard steps, distinct from the four
+infrastructure/prompt bugs above.
 
 ### First experiment: findings (Josh Gambrell, "This Shape Is Easy!")
 
