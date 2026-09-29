@@ -33,7 +33,15 @@ ACTION_CUES = [
     r"\bshade smooth\b", r"\bshade flat\b", r"\bgrid fill\b", r"\bloop tools?\b",
     r"\blimited dissolve\b", r"\bdissolve\b", r"\bdelete\b", r"\bloop cut\b",
     r"\bknife\b", r"\bbisect\b", r"\barray\b", r"\bcurve modifier\b",
-    r"\bsub[- ]?d\b", r"\bsubsurf\b", r"\bsubdivision surface\b",
+    # Deliberately NOT here: bare "sub[- ]?d" / "subsurf" / "subdivision
+    # surface". Those matched purely descriptive mentions too ("using a
+    # sub D workflow", not a command), which the automated verification
+    # loop's first real run showed causing real damage: a false-positive
+    # segment boundary made the reconstruction agent invent a fabricated
+    # "add subsurf modifier" action for a segment that had nothing to
+    # reconstruct, creating a duplicate object that polluted every later
+    # segment's chained state. "add (a|an|in a|in an)" and "apply" below
+    # already catch genuine "add/apply a subsurf" commands.
     r"\badd (?:a|an|in a|in an)\b", r"\badd modifier\b",
     r"\bselect (?:all|one|similar|co-?planar)\b",
     r"\bmerge\b", r"\bjoin\b", r"\bseparate\b", r"\bapply\b",
