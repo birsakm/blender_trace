@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
+automate = ["openai>=1.40.0", "python-dotenv>=1.0.0"]
 
 [project.scripts]
 blender-trace = "blender_trace.cli:main"

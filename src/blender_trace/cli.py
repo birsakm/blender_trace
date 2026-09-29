@@ -10,12 +10,14 @@ Unified CLI for the BlenderTrace mining pipeline:
     blender-trace keyframes <video_dir> [--panel-box x0 y0 x1 y1]   # only for --method visual
     blender-trace pipeline <url>   # download -> transcribe -> manifest (narration by default)
     blender-trace render <script.py> --out <dir>   # headless-render a bpy/bmesh script
+    blender-trace auto-verify <video_dir>   # GPT-powered reconstruct+render+judge, chained
 """
 import argparse
 import json
 import sys
 from pathlib import Path
 
+from . import agent as agent_mod
 from . import discover as discover_mod
 from . import download as download_mod
 from . import keyframes as keyframes_mod
@@ -88,6 +90,59 @@ def cmd_verify(args):
         verdict = {"match": args.match, "reasoning": args.reasoning, "judge": args.judge}
         path = verify_mod.save_verdict(args.video_dir, args.segment_index, verdict)
         print(f"Saved verdict to {path}")
+
+
+def cmd_auto_verify(args):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    import os
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print("Requires the 'openai' package: pip install -e '.[automate]'", file=sys.stderr)
+        sys.exit(1)
+    if not os.environ.get("OPENAI_API_KEY"):
+        print(
+            "OPENAI_API_KEY is not set. Set it as an env var, or put it in a "
+            ".env file at the repo root (OPENAI_API_KEY=sk-...).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    manifest = json.loads((args.video_dir / "manifest.json").read_text())
+    end = args.end if args.end is not None else len(manifest) - 1
+    client = OpenAI()
+
+    prior_state = None
+    if args.start > 0:
+        candidate = verify_mod.segment_dir(args.video_dir, args.start - 1) / "state.blend"
+        if candidate.exists():
+            prior_state = candidate
+        else:
+            print(
+                f"Warning: no prior state.blend at {candidate}; starting segment "
+                f"{args.start} from an empty scene instead of the real chained state.",
+                file=sys.stderr,
+            )
+
+    tally = {"match": 0, "partial": 0, "mismatch": 0}
+    for i in range(args.start, end + 1):
+        seg = manifest[i]
+        print(f"[{i}] {seg['narration'][:80]}")
+        result = agent_mod.run_segment(
+            client, args.model, args.video_dir, i, seg, prior_state,
+            max_retries=args.max_retries,
+        )
+        verdict = result.verdict.get("verdict", "mismatch")
+        tally[verdict if verdict in tally else "mismatch"] += 1
+        print(f"    -> {verdict} ({result.attempts} attempt(s)): {result.verdict.get('reasoning', '')}")
+        prior_state = result.state_blend
+
+    print(f"\nDone. {tally}")
 
 
 def cmd_manifest(args):
@@ -208,6 +263,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reasoning", default="")
     p.add_argument("--judge", default="claude-code-session")
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser(
+        "auto-verify",
+        help="GPT-powered reconstruct+render+judge for a manifest range, chained via state.blend",
+    )
+    p.add_argument("video_dir", type=Path)
+    p.add_argument("--start", type=int, default=0, help="first segment index (default 0)")
+    p.add_argument("--end", type=int, default=None, help="last segment index, inclusive (default: last)")
+    p.add_argument("--model", default=agent_mod.DEFAULT_MODEL)
+    p.add_argument("--max-retries", type=int, default=2)
+    p.set_defaults(func=cmd_auto_verify)
 
     return ap
 

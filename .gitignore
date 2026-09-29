@@ -1,5 +1,7 @@
 data/
 discovered*.json
+.env
+.env.*
 .claude/
 *.egg-info/
 __pycache__/

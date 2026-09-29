@@ -28,15 +28,24 @@ The **data-mining side** works end to end: live video discovery, download,
 transcription, narration-driven segmentation, and manifest building produce
 `manifest.json` per video. The **verification loop** (agent reconstructs
 `bpy`/`bmesh` code per segment → render headless → compare against
-`frame_after` → keep only matches) now has working infrastructure
-(`render.py`, `verify.py`) and has been piloted end to end on 3 real
-segments -- see "Verification loop pilot" below. There's no
-`ANTHROPIC_API_KEY` (or equivalent) configured in this environment, so the
-"write code from narration+frames" and "judge the render" steps are
-currently done by a Claude Code session/subagent acting on the files
-`verify.py` produces, not by a standalone automated script -- see that
-section for what that means in practice and how to swap in an API-driven
-caller later.
+`frame_after` → keep only matches) has working infrastructure
+(`render.py`, `verify.py`) and was first piloted by hand -- a Claude Code
+session playing both the "write the code" and "judge the render" roles --
+on 8 real segments across 2 videos; see "Verification loop pilot" below.
+
+That's now automated: `agent.py` calls GPT (vision-capable, via the
+`openai` SDK) for both roles, with a self-correction retry loop (the judge's
+critique feeds back into a second reconstruction attempt) and persistent
+`.blend` state chaining across segments, so segment *N* loads the state
+segment *N-1* left rather than replaying the whole video from scratch.
+Wired up as `blender-trace auto-verify <video_dir> [--start N] [--end M]
+[--max-retries K]`. Needs `pip install -e ".[automate]"` and
+`OPENAI_API_KEY` set (env var, or a `.env` file at the repo root -- gitignored,
+loaded automatically). The client is constructed with the plain OpenAI SDK
+(`OpenAI()`), so it also works unmodified against any OpenAI-compatible
+endpoint (e.g. a self-hosted open-weight model server) by passing a
+different `base_url` -- useful for the cost/open-source-model direction
+this project is headed, without changing `agent.py` itself.
 
 This machine has real internet access, 4x A100 GPUs, and a standalone
 Blender 4.3.0 binary at `blender-releases/blender-4.3.0-linux-x64/` used for
@@ -160,6 +169,49 @@ starting to taper off relative to batch 1. The next real decision is
 whether to keep running pilots like this, or start scoping what
 automating this loop (an API-driven caller, see "Status" above) would
 actually take.
+
+### Automated verification loop (`agent.py`)
+
+Built the automated version discussed after batch 3: two GPT calls
+(reconstruct, judge) plus a self-correction retry loop, orchestrated by
+`run_segment()` and driven per-video by `blender-trace auto-verify`. Key
+differences from the manual pilot above, and why:
+
+- **Persistent `.blend` state chaining** instead of every segment replaying
+  the video from scratch. `render.py` gained `load_blend`/`save_blend`
+  params for this -- the clean state is always saved *before* the
+  render-only wireframe/camera/light get added, so those never leak into
+  the next segment's starting point. Tested directly: a two-step chain
+  (add a cube, save state, load state, add a sphere) correctly ends with
+  both objects present.
+- **Self-correction retries**: on a non-match verdict (or the reconstructed
+  code simply raising an exception), the judge's critique (or the
+  exception text) feeds back into a second reconstruction attempt, up to
+  `--max-retries` (default 2). Tested with a fake client: broken code on
+  attempt 0, working code + a "match" verdict on attempt 1.
+- **Segments that exhaust retries still advance the chained state** (with
+  whatever the last attempt produced), rather than freezing it. The
+  alternative -- leave state unchanged -- silently breaks every later
+  segment's narration references ("select this", "the other one") to
+  whatever this segment was supposed to add. Their verdict is recorded as
+  unresolved either way, so they're easy to filter out of a final training
+  set without breaking the chain for everything downstream.
+- **Real capability gap versus the manual pilot, worth stating plainly**:
+  the manual process caught bugs (the `symmetrize`/`select_all` issue, the
+  hidden-face camera issue) by writing one-off diagnostic scripts and
+  re-deriving camera math when something looked wrong -- not just retrying
+  with a text critique. The automated loop only gets narration + images +
+  the judge's verdict text on each retry. Expect its per-segment success
+  rate to be measurably lower than the manual pilot's until proven
+  otherwise -- worth checking directly by running it over the same 8
+  segments the manual pilot already covers and comparing verdicts.
+
+Requires `OPENAI_API_KEY`; not yet run against real data as of this commit
+(waiting on the key). `client` is a plain `openai.OpenAI()` instance passed
+into every function rather than constructed inside `agent.py`, so nothing
+about the reconstruct/judge/retry logic is OpenAI-specific -- swapping in a
+self-hosted open-weight model later (e.g. via vLLM's OpenAI-compatible
+server) is a `base_url` change at the call site, not a rewrite.
 
 ### First experiment: findings (Josh Gambrell, "This Shape Is Easy!")
 

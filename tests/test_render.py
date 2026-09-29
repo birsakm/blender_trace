@@ -33,3 +33,23 @@ def test_render_script_raises_on_broken_reconstruction_code(tmp_path):
 
     with pytest.raises(RuntimeError):
         render_script(script, tmp_path / "out")
+
+
+@pytest.mark.skipif(not blender_available, reason="standalone Blender binary not present")
+def test_render_script_chains_state_across_segments(tmp_path):
+    step1 = tmp_path / "step1.py"
+    step1.write_text("import bpy\nbpy.ops.mesh.primitive_cube_add(size=2)\n")
+    step2 = tmp_path / "step2.py"
+    step2.write_text(
+        "import bpy\n"
+        "bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, location=(2, 0, 0))\n"
+    )
+    state1 = tmp_path / "state1.blend"
+
+    r1 = render_script(step1, tmp_path / "out1", save_blend=state1)
+    assert r1["stats"]["objects"] == 1
+    assert state1.exists()
+
+    r2 = render_script(step2, tmp_path / "out2", load_blend=state1)
+
+    assert r2["stats"]["objects"] == 2  # cube preserved + sphere added

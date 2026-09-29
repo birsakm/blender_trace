@@ -8,13 +8,12 @@ renders it and standardizes where the result and verdict live, so the
 frame_after" steps -- both of which need a capable vision model -- can be
 done by whatever's playing that role.
 
-This module does NOT call any LLM itself. There's no ANTHROPIC_API_KEY (or
-equivalent) wired up in this environment (see README), so right now that
-role is played by a Claude Code session/subagent acting directly on the
-files this writes -- see README "Verification loop pilot" for how that
-went on three real segments. If an API key becomes available later, a
-script that calls it programmatically can slot in here without changing
-this file layout.
+This module does NOT call any LLM itself -- that's agent.py (GPT-powered,
+see `blender-trace auto-verify`) or a human/Claude Code session acting
+directly on the files this writes (see README "Verification loop pilot"
+for how the latter went on the first 8 manually-piloted segments, before
+agent.py existed). Both write into the same `verify/<segment_index>/`
+layout and verdict.json schema, so results from either are comparable.
 """
 import json
 from pathlib import Path

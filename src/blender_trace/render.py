@@ -20,6 +20,15 @@ purely because that face was on the far/hidden side of the object from
 that one angle -- confirmed by re-rendering from an axis-aligned view, which
 showed the edit clearly. Multiple corner views make that kind of
 false-negative much less likely.
+
+Supports chaining across segments via load_blend/save_blend: a video's
+state persists as one .blend that each segment's script loads, modifies,
+and re-saves -- rather than every segment replaying the whole video from
+scratch (what the manual pilot scripts did, fine for a handful of hand-
+written segments, but doesn't scale and compounds error into every later
+step). The clean state is always saved *before* the wireframe-overlay
+duplicates/camera/light get added for rendering, so those never leak into
+the next segment's starting state.
 """
 import json
 import subprocess
@@ -32,10 +41,18 @@ import json
 import bpy
 import mathutils
 
-bpy.ops.wm.read_factory_settings(use_empty=True)
+load_blend = {load_blend!r}
+if load_blend:
+    bpy.ops.wm.open_mainfile(filepath=load_blend)
+else:
+    bpy.ops.wm.read_factory_settings(use_empty=True)
 
 with open({script!r}) as f:
     exec(compile(f.read(), {script!r}, "exec"))
+
+save_blend = {save_blend!r}
+if save_blend:
+    bpy.ops.wm.save_as_mainfile(filepath=save_blend)
 
 meshes = [o for o in bpy.data.objects if o.type == "MESH"]
 
@@ -137,15 +154,23 @@ def render_script(
     blender_bin: str = DEFAULT_BLENDER,
     resolution: tuple[int, int] = (960, 720),
     views: dict[str, tuple[float, float, float]] = DEFAULT_VIEWS,
+    load_blend: Path | None = None,
+    save_blend: Path | None = None,
 ) -> dict:
     """Run a bpy/bmesh reconstruction script headlessly and render the
     resulting scene from several fixed, auto-framed corner angles (see
     module docstring for why one angle alone isn't reliable).
 
-    script_path should build geometry into a fresh scene (it runs against
-    bpy.ops.wm.read_factory_settings(use_empty=True) -- an empty scene, not
-    the default cube). Raises RuntimeError with stdout/stderr if Blender
-    exits non-zero or no renders appear (e.g. the script itself raised).
+    script_path should build/modify geometry in place. With load_blend=None
+    it runs against an empty scene (bpy.ops.wm.read_factory_settings); with
+    load_blend given, it opens that .blend first, so script_path only needs
+    to contain the new segment's incremental change. save_blend, if given,
+    writes the resulting clean state out before any render-only wireframe
+    duplicates/camera/light get added -- pass it as the next segment's
+    load_blend to chain.
+
+    Raises RuntimeError with stdout/stderr if Blender exits non-zero or no
+    renders appear (e.g. the script itself raised).
 
     Returns {"render_paths": {view_name: path, ...}, "stats": {...}}.
     """
@@ -160,6 +185,8 @@ def render_script(
         render_dir=str(out_dir),
         views=views,
         stats_path=str(stats_path),
+        load_blend=str(load_blend) if load_blend else None,
+        save_blend=str(save_blend) if save_blend else None,
     ))
 
     env = {"HOME": str(Path.home()), "PATH": "/usr/bin:/bin"}
