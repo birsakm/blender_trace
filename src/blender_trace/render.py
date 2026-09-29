@@ -148,6 +148,9 @@ DEFAULT_VIEWS = {
 }
 
 
+DEFAULT_TIMEOUT_S = 90
+
+
 def render_script(
     script_path: Path,
     out_dir: Path,
@@ -156,6 +159,7 @@ def render_script(
     views: dict[str, tuple[float, float, float]] = DEFAULT_VIEWS,
     load_blend: Path | None = None,
     save_blend: Path | None = None,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> dict:
     """Run a bpy/bmesh reconstruction script headlessly and render the
     resulting scene from several fixed, auto-framed corner angles (see
@@ -169,8 +173,15 @@ def render_script(
     duplicates/camera/light get added -- pass it as the next segment's
     load_blend to chain.
 
-    Raises RuntimeError with stdout/stderr if Blender exits non-zero or no
-    renders appear (e.g. the script itself raised).
+    Raises RuntimeError with stdout/stderr if Blender exits non-zero, times
+    out, or no renders appear (e.g. the script itself raised). A generated
+    reconstruction script can hit a genuine hang, not just an error -- e.g.
+    a bmesh op on an unselected/degenerate face set that Blender spins on
+    indefinitely rather than erroring. Piloting the automated loop hit this
+    directly: a real subprocess sat at 100% CPU for 25+ minutes with no
+    timeout in place, silently blocking the whole pipeline. timeout_s kills
+    it and surfaces a normal RuntimeError instead, which the retry loop in
+    agent.py already knows how to handle like any other failed attempt.
 
     Returns {"render_paths": {view_name: path, ...}, "stats": {...}}.
     """
@@ -190,10 +201,15 @@ def render_script(
     ))
 
     env = {"HOME": str(Path.home()), "PATH": "/usr/bin:/bin"}
-    result = subprocess.run(
-        [blender_bin, "--background", "--factory-startup", "--python", str(driver_path)],
-        capture_output=True, text=True, env=env,
-    )
+    cmd = [blender_bin, "--background", "--factory-startup", "--python", str(driver_path)]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout_s)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"render timed out after {timeout_s}s (likely an infinite loop or hang in the "
+            f"reconstruction script, e.g. a bmesh op on a degenerate/unselected face set):\n"
+            f"--- stdout so far ---\n{e.stdout or ''}\n--- stderr so far ---\n{e.stderr or ''}"
+        )
     stats = json.loads(stats_path.read_text()) if stats_path.exists() else {}
     render_paths = stats.pop("render_paths", {})
     if result.returncode != 0 or not render_paths:

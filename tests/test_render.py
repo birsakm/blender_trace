@@ -27,6 +27,15 @@ def test_render_script_produces_render_and_stats(tmp_path):
 
 
 @pytest.mark.skipif(not blender_available, reason="standalone Blender binary not present")
+def test_render_script_raises_on_timeout_instead_of_hanging(tmp_path):
+    script = tmp_path / "script.py"
+    script.write_text("while True:\n    pass\n")  # simulates a real hang found in practice
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        render_script(script, tmp_path / "out", timeout_s=2)
+
+
+@pytest.mark.skipif(not blender_available, reason="standalone Blender binary not present")
 def test_render_script_raises_on_broken_reconstruction_code(tmp_path):
     script = tmp_path / "script.py"
     script.write_text("this is not valid python (((\n")
