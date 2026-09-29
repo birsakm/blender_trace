@@ -129,7 +129,7 @@ def cmd_auto_verify(args):
                 file=sys.stderr,
             )
 
-    tally = {"match": 0, "partial": 0, "mismatch": 0}
+    tally = {"match": 0, "partial": 0, "mismatch": 0, "skipped": 0}
     for i in range(args.start, end + 1):
         seg = manifest[i]
         print(f"[{i}] {seg['narration'][:80]}")
