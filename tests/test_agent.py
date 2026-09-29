@@ -56,6 +56,24 @@ def test_reconstruct_segment_sends_images_and_returns_code(tmp_path):
     assert image_count == 2  # frame_before + frame_after, no panel crops given
 
 
+def test_reconstruct_segment_includes_prior_segment_code_when_given(tmp_path):
+    frame_before = tmp_path / "before.png"
+    frame_after = tmp_path / "after.png"
+    frame_before.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0")
+    frame_after.write_bytes(b"\x89PNG\r\n\x1a\n" + b"1")
+    client = FakeClient(["```python\nbpy.ops.mesh.subdivide(number_cuts=1)\n```"])
+
+    agent.reconstruct_segment(
+        client, "gpt-4o", "shift R to repeat the command", frame_before, frame_after,
+        "(empty scene)", prior_segment_code="bpy.ops.mesh.subdivide(number_cuts=1)",
+    )
+
+    sent_content = client.calls[0]["messages"][1]["content"]
+    text_blocks = " ".join(b["text"] for b in sent_content if b.get("type") == "text")
+    assert "preceding step's code" in text_blocks
+    assert "subdivide(number_cuts=1)" in text_blocks
+
+
 def test_judge_render_parses_json_verdict(tmp_path):
     frame_after = tmp_path / "after.png"
     frame_after.write_bytes(b"\x89PNG\r\n\x1a\n" + b"1")
@@ -98,6 +116,36 @@ def test_run_segment_skip_carries_prior_state_forward_unchanged(tmp_path):
     result = agent.run_segment(client, "gpt-4o", video_dir, 1, segment, prior_state, max_retries=1)
 
     assert result.state_blend.read_bytes() == prior_state.read_bytes()
+
+
+@pytest.mark.skipif(not blender_available, reason="standalone Blender binary not present")
+def test_run_segment_passes_prior_segment_code_for_repeat_narration(tmp_path):
+    from blender_trace import verify as verify_mod
+
+    video_dir = tmp_path / "video"
+    video_dir.mkdir()
+    frame_before = video_dir / "before.png"
+    frame_after = video_dir / "after.png"
+    frame_before.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0")
+    frame_after.write_bytes(b"\x89PNG\r\n\x1a\n" + b"1")
+
+    # Simulate segment 0 having already run and accepted this code.
+    seg0_dir = verify_mod.segment_dir(video_dir, 0)
+    seg0_dir.mkdir(parents=True)
+    (seg0_dir / "code.py").write_text("import bpy\nbpy.ops.mesh.primitive_cube_add(size=2)\n")
+
+    segment = {"narration": "shift R to repeat the command", "frame_before": "before.png", "frame_after": "after.png"}
+    client = FakeClient([
+        "```python\nimport bpy\nbpy.ops.mesh.primitive_cube_add(size=2)\n```",
+        json.dumps({"verdict": "match", "scope": "full-segment",
+                    "mismatch_category": None, "reasoning": "repeated correctly"}),
+    ])
+
+    agent.run_segment(client, "gpt-4o", video_dir, 1, segment, None, max_retries=1)
+
+    sent_content = client.calls[0]["messages"][1]["content"]
+    text_blocks = " ".join(b["text"] for b in sent_content if b.get("type") == "text")
+    assert "primitive_cube_add(size=2)" in text_blocks
 
 
 @pytest.mark.skipif(not blender_available, reason="standalone Blender binary not present")

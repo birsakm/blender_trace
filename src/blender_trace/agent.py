@@ -152,8 +152,16 @@ def reconstruct_segment(
     panel_after: Path | None = None,
     previous_attempt: str | None = None,
     previous_critique: str | None = None,
+    prior_segment_code: str | None = None,
 ) -> str:
-    """One reconstruction call. Returns bpy/bmesh code as a string."""
+    """One reconstruction call. Returns bpy/bmesh code as a string.
+
+    prior_segment_code is the accepted code from the immediately preceding
+    segment (not this segment's own retry history) -- needed to resolve
+    narration like "repeat the last operator" or "do the same thing",
+    which is otherwise unresolvable: the model has no other way to know
+    what the previous step's code actually did.
+    """
     content = [{
         "type": "text",
         "text": (
@@ -170,14 +178,28 @@ def reconstruct_segment(
         content.append(_b64_image(panel_before))
     if panel_after and Path(panel_after).exists():
         content.append(_b64_image(panel_after))
+    if prior_segment_code:
+        content.append({
+            "type": "text",
+            "text": (
+                f"\nFor reference, the immediately preceding step's code was:\n"
+                f"```python\n{prior_segment_code}\n```\n"
+                "Use this if the narration above refers back to it (e.g. "
+                "\"repeat\", \"the same thing\", \"again\") -- otherwise ignore it."
+            ),
+        })
     if previous_attempt and previous_critique:
         content.append({
             "type": "text",
             "text": (
-                f"\nA previous attempt was judged not to match:\n"
+                f"\nA previous attempt at THIS step was judged not to match:\n"
                 f"--- previous code ---\n{previous_attempt}\n"
                 f"--- judge's critique ---\n{previous_critique}\n"
-                "Write a corrected attempt."
+                "If the critique points at a specific, narrow problem (wrong "
+                "object, wrong parameter, a line that raised), make the "
+                "smallest change that fixes it -- keep the rest of the "
+                "approach. Only try a genuinely different approach if the "
+                "critique says the whole strategy was wrong."
             ),
         })
 
@@ -263,6 +285,11 @@ def run_segment(
             shutil.copy(prior_state_blend, final_state)
         else:
             final_state = None
+        prior_code_path = (
+            verify_mod.segment_dir(video_dir, segment_index - 1) / "code.py" if segment_index > 0 else None
+        )
+        prior_code = prior_code_path.read_text() if prior_code_path and prior_code_path.exists() else ""
+        (seg_dir / "code.py").write_text(prior_code)
         verdict = {
             "verdict": "skipped", "scope": "none", "mismatch_category": None,
             "reasoning": "narration contains no recognized action cue; treated as "
@@ -278,9 +305,15 @@ def run_segment(
     panel_before = video_dir / segment.get("panel_before", "") if segment.get("panel_before") else None
     panel_after = video_dir / segment.get("panel_after", "") if segment.get("panel_after") else None
 
+    prior_segment_code = None
+    if segment_index > 0:
+        prior_code_path = verify_mod.segment_dir(video_dir, segment_index - 1) / "code.py"
+        if prior_code_path.exists():
+            prior_segment_code = prior_code_path.read_text()
+
     code, critique = None, None
     verdict, render_paths = None, {}
-    last_successful_state = None  # falls back to prior_state_blend if every attempt errors
+    last_successful_state, last_successful_code = None, None  # fall back to prior_state_blend if every attempt errors
     attempts_made = 0
 
     for attempt in range(max_retries + 1):
@@ -289,6 +322,7 @@ def run_segment(
             client, model, segment["narration"], frame_before, frame_after,
             scene_summary, panel_before, panel_after,
             previous_attempt=code, previous_critique=critique,
+            prior_segment_code=prior_segment_code,
         )
         attempt_dir = seg_dir / f"attempt_{attempt}"
         code_path = attempt_dir / "reconstruct.py"
@@ -307,7 +341,7 @@ def run_segment(
             (attempt_dir / "error.txt").write_text(critique)
             continue
 
-        last_successful_state = state_out
+        last_successful_state, last_successful_code = state_out, code
         render_paths = result["render_paths"]
         verdict = judge_render(
             client, model, render_paths, frame_after, segment["narration"], stats=result["stats"],
@@ -324,6 +358,11 @@ def run_segment(
     source = last_successful_state or prior_state_blend
     if source and Path(source).exists():
         shutil.copy(source, final_state)
+    # Persist the accepted code too, so the *next* segment can resolve
+    # "repeat"/"same thing" narration -- falls back to the prior segment's
+    # own code if this segment never rendered successfully, so a run of
+    # failures doesn't erase that context for whatever comes after.
+    (seg_dir / "code.py").write_text(last_successful_code or prior_segment_code or "")
 
     verify_mod.save_verdict(video_dir, segment_index, {**verdict, "attempts": attempts_made, "judge": model})
     return SegmentResult(segment_index, verdict, code, attempts_made, final_state, render_paths)
