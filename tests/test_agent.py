@@ -69,6 +69,37 @@ def test_judge_render_parses_json_verdict(tmp_path):
     assert client.calls[0]["response_format"] == {"type": "json_object"}
 
 
+def test_run_segment_skips_non_actionable_narration_without_calling_client(tmp_path):
+    video_dir = tmp_path / "video"
+    video_dir.mkdir()
+    segment = {
+        "narration": "what's up guys, in today's video I want to show you something cool",
+        "frame_before": "before.png", "frame_after": "after.png",
+    }
+    client = FakeClient([])  # would raise IndexError if anything tried to call it
+
+    result = agent.run_segment(client, "gpt-4o", video_dir, 0, segment, None, max_retries=2)
+
+    assert result.verdict["verdict"] == "skipped"
+    assert result.attempts == 0
+    assert client.calls == []
+    verdict_path = video_dir / "verify" / "0000" / "verdict.json"
+    assert json.loads(verdict_path.read_text())["verdict"] == "skipped"
+
+
+def test_run_segment_skip_carries_prior_state_forward_unchanged(tmp_path):
+    video_dir = tmp_path / "video"
+    video_dir.mkdir()
+    prior_state = tmp_path / "prior.blend"
+    prior_state.write_bytes(b"fake blend contents")
+    segment = {"narration": "no action here at all", "frame_before": "b.png", "frame_after": "a.png"}
+    client = FakeClient([])
+
+    result = agent.run_segment(client, "gpt-4o", video_dir, 1, segment, prior_state, max_retries=1)
+
+    assert result.state_blend.read_bytes() == prior_state.read_bytes()
+
+
 @pytest.mark.skipif(not blender_available, reason="standalone Blender binary not present")
 def test_run_segment_retries_then_succeeds(tmp_path):
     video_dir = tmp_path / "video"

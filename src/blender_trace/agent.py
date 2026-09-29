@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import render as render_mod
+from . import segment as segment_mod
 
 DEFAULT_MODEL = "gpt-4o"  # verify this is still OpenAI's current vision-capable model
 
@@ -50,6 +51,16 @@ equivalent.
 - Where a needed value (exact numeric parameter, which object/face) isn't \
 visible in the narration or images, make the single most plausible choice \
 and proceed -- you cannot ask a follow-up question.
+- Object names: use ONLY the exact names listed in "Current scene state" \
+below to refer to existing objects. The screenshots show the tutorial's \
+own separate Blender project -- any object names visible in them (e.g. in \
+an outliner panel) do NOT exist in your scene and referencing them will \
+raise a KeyError. If "Current scene state" is empty, you are creating the \
+first object(s).
+- Narration mentioning "repeat" / "shift R" / "repeat the command": do NOT \
+call bpy.ops.screen.repeat_last() -- it depends on window/UI context this \
+headless script does not have and will fail. Instead, explicitly call the \
+same underlying operator again with the same parameters.
 """
 
 JUDGE_SYSTEM_PROMPT = """\
@@ -58,11 +69,19 @@ tutorial's before/after frames.
 
 You'll see the narration for this step, the real "after" screenshot from \
 the tutorial, and 4 rendered views of the reconstruction (fixed corner \
-angles, auto-framed on the object). The render angles do NOT match the \
-tutorial's camera -- there is no recoverable ground-truth camera pose, so \
-ignore camera position/background and judge topology/shape/silhouette \
-plausibility instead. An edit can be hidden from one render view but \
-visible in another -- check all 4 before concluding something is missing.
+angles, auto-framed on the object), plus the reconstruction's vertex/face \
+counts as text. The render angles do NOT match the tutorial's camera -- \
+there is no recoverable ground-truth camera pose, so ignore camera \
+position/background and judge topology/shape/silhouette plausibility \
+instead. An edit can be hidden from one render view but visible in \
+another -- check all 4 before concluding something is missing.
+
+Be quantitatively precise about topology where the screenshot shows a \
+visible grid or subdivision pattern: count the grid cells/divisions
+visible in the "after" screenshot and compare against the reconstruction's \
+vertex/face counts and rendered grid density, rather than judging "looks \
+roughly subdivided" as sufficient. A 2x2 grid, 3x3 grid, and 4x4 grid look \
+similar at a glance but are different operations -- get this right.
 
 Respond with ONLY a single JSON object, no other text, matching:
 {
@@ -178,11 +197,16 @@ def judge_render(
     render_paths: dict[str, str],
     frame_after: Path,
     narration: str,
+    stats: dict | None = None,
 ) -> dict:
     """One judging call. Returns the parsed verdict dict."""
+    stats_text = f"\nReconstruction stats: {stats}" if stats else ""
     content = [{
         "type": "text",
-        "text": f"Narration for this step:\n{narration}\n\nImages: frame_after, then 4 render views.",
+        "text": (
+            f"Narration for this step:\n{narration}{stats_text}\n\n"
+            "Images: frame_after, then 4 render views."
+        ),
     }]
     content.append(_b64_image(frame_after))
     for path in render_paths.values():
@@ -225,6 +249,28 @@ def run_segment(
 
     seg_dir = verify_mod.segment_dir(video_dir, segment_index)
     seg_dir.mkdir(parents=True, exist_ok=True)
+
+    # Segments before the first recognized action cue (e.g. intro narration
+    # -- "what's up guys, today I'll show you...") have nothing to
+    # reconstruct. Attempting them anyway was the root cause of the worst
+    # failures in the first real run: the model invented a plausible-but-
+    # fabricated action, creating a spurious object that then polluted
+    # every downstream segment's chained state. Skip instead -- no GPT
+    # call, state carries forward unchanged.
+    if not segment_mod.mentions_action_cue(segment["narration"]):
+        final_state = seg_dir / "state.blend"
+        if prior_state_blend and Path(prior_state_blend).exists():
+            shutil.copy(prior_state_blend, final_state)
+        else:
+            final_state = None
+        verdict = {
+            "verdict": "skipped", "scope": "none", "mismatch_category": None,
+            "reasoning": "narration contains no recognized action cue; treated as "
+                         "non-actionable preamble, no reconstruction attempted",
+        }
+        verify_mod.save_verdict(video_dir, segment_index, {**verdict, "attempts": 0, "judge": model})
+        return SegmentResult(segment_index, verdict, "", 0, final_state, {})
+
     scene_summary = inspect_blend(prior_state_blend) if prior_state_blend else "(empty scene)"
 
     frame_before = video_dir / segment["frame_before"]
@@ -258,11 +304,15 @@ def run_segment(
             verdict = {"verdict": "mismatch", "scope": "full-segment",
                        "mismatch_category": "other", "reasoning": f"code raised: {e}"}
             critique = str(e)
+            (attempt_dir / "error.txt").write_text(critique)
             continue
 
         last_successful_state = state_out
         render_paths = result["render_paths"]
-        verdict = judge_render(client, model, render_paths, frame_after, segment["narration"])
+        verdict = judge_render(
+            client, model, render_paths, frame_after, segment["narration"], stats=result["stats"],
+        )
+        (attempt_dir / "verdict.json").write_text(json.dumps(verdict, indent=2))
         if verdict.get("verdict") == "match":
             break
         critique = verdict.get("reasoning", "")
